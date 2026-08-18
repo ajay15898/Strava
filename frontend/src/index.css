@@ -1,0 +1,118 @@
+@import "tailwindcss";
+
+@import "@fontsource-variable/geist";
+@import "@fontsource-variable/geist-mono";
+
+@theme {
+  --font-sans: "Geist Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Geist Mono Variable", ui-monospace, "SF Mono", monospace;
+}
+
+/* Roles, not raw hex. Light is the base definition; dark redefines only what
+   changes, under both the OS media query and the explicit theme stamp so a
+   toggle wins in either direction. */
+:root {
+  color-scheme: light;
+
+  --surface-page: #f9fafb;
+  --surface-card: #ffffff;
+  --surface-sunken: #f4f4f5;
+  --border-hairline: rgb(226 232 240 / 0.7);
+  --border-strong: rgb(212 212 216 / 0.9);
+
+  --text-primary: #18181b;
+  --text-secondary: #52525b;
+  --text-muted: #a1a1aa;
+
+  --accent: #2a78d6;
+  --accent-soft: rgb(42 120 214 / 0.09);
+
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+
+  --good: #1baf7a;
+  --warning: #eda100;
+  --critical: #e34948;
+
+  --shadow-diffuse: 0 20px 40px -18px rgb(24 24 27 / 0.10);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+
+    --surface-page: #0d0d0f;
+    --surface-card: #18181b;
+    --surface-sunken: #202024;
+    --border-hairline: rgb(63 63 70 / 0.6);
+    --border-strong: rgb(82 82 91 / 0.8);
+
+    --text-primary: #fafafa;
+    --text-secondary: #a1a1aa;
+    --text-muted: #71717a;
+
+    --accent: #3987e5;
+    --accent-soft: rgb(57 135 229 / 0.14);
+
+    --series-1: #3987e5;
+    --series-2: #d95926;
+
+    --good: #199e70;
+    --warning: #c98500;
+    --critical: #e66767;
+
+    --shadow-diffuse: 0 20px 40px -18px rgb(0 0 0 / 0.55);
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --surface-page: #0d0d0f;
+  --surface-card: #18181b;
+  --surface-sunken: #202024;
+  --border-hairline: rgb(63 63 70 / 0.6);
+  --border-strong: rgb(82 82 91 / 0.8);
+
+  --text-primary: #fafafa;
+  --text-secondary: #a1a1aa;
+  --text-muted: #71717a;
+
+  --accent: #3987e5;
+  --accent-soft: rgb(57 135 229 / 0.14);
+
+  --series-1: #3987e5;
+  --series-2: #d95926;
+
+  --good: #199e70;
+  --warning: #c98500;
+  --critical: #e66767;
+
+  --shadow-diffuse: 0 20px 40px -18px rgb(0 0 0 / 0.55);
+}
+
+html, body, #root {
+  min-height: 100%;
+}
+
+body {
+  background: var(--surface-page);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  font-feature-settings: "cv11", "ss01";
+}
+
+/* Tabular figures everywhere numbers are compared down a column. */
+.tnum {
+  font-variant-numeric: tabular-nums;
+  font-family: var(--font-mono);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
