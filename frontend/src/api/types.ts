@@ -188,3 +188,19 @@ export interface Digest {
   sessions_total: number;
   adaptations: Adaptation[];
 }
+
+export interface CoachReply {
+  content: string;
+  verified: boolean;
+  used_fallback: boolean;
+  attempts: number;
+  violations: string[];
+  model: string;
+}
+
+export interface CoachMessage {
+  id: number;
+  role: "user" | "assistant";
+  content: string;
+  created_at: string;
+}

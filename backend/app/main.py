@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routes import activities, analytics, athlete, auth, plan, sync
+from app.api.routes import activities, analytics, athlete, auth, coach, plan, sync
 from app.config import get_settings
 from app import scheduler
 
@@ -42,6 +42,7 @@ app.include_router(athlete.router)
 app.include_router(activities.router)
 app.include_router(analytics.router)
 app.include_router(plan.router)
+app.include_router(coach.router)
 
 
 @app.get("/api/health")

@@ -9,6 +9,7 @@ import { EmptyState, ErrorState } from "../../components/States";
 import { StatTile } from "../../components/StatTile";
 import { ActivityTable } from "../activities/ActivityTable";
 import { PlanView } from "../plan/PlanView";
+import { CoachPanel } from "../coach/CoachPanel";
 import { WeekDigest } from "../plan/WeekDigest";
 import { hms, mediumDate } from "../../lib/format";
 import type { Mode } from "../../lib/theme";
@@ -139,6 +140,8 @@ export function Dashboard({ mode }: { mode: Mode }) {
       </Panel>
 
       <WeekDigest mode={mode} />
+
+      <CoachPanel mode={mode} />
 
       <PlanView mode={mode} />
 

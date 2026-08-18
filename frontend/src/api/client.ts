@@ -2,6 +2,8 @@ import type {
   Activity,
   Adaptation,
   AthleteProfile,
+  CoachMessage,
+  CoachReply,
   Digest,
   Feasibility,
   LoadDay,
@@ -89,6 +91,8 @@ export const api = {
   plan: () => get<PlanDetail>("/plan/current"),
   adaptations: () => get<Adaptation[]>("/plan/adaptations"),
   digest: () => get<Digest>("/plan/digest"),
+  coachHistory: () => get<CoachMessage[]>("/coach/history"),
+  askCoach: (message: string) => send<CoachReply>("POST", "/coach/message", { message }),
   generatePlan: () => send<PlanDetail>("POST", "/plan/generate"),
   reconcilePlan: () => send<PlanDetail>("POST", "/plan/reconcile"),
   setSessionStatus: (id: number, status: SessionStatus) =>

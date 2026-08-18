@@ -5,8 +5,7 @@ model, and runs an AI coaching layer on top of a deterministic training engine.
 
 **Goal:** half marathon under 2:00:00 (5:41/km sustained for 21.1 km).
 
-**Status:** M1 (ingest), M2 (analytics), M3 (dashboard), M4 (planner) and
-M6 (adaptation) are built. M5 (coach) and M7 (streams) are not started.
+**Status:** M1–M6 are built. M7 (streams) is not started.
 
 **Race:** 2026-10-04. Seven weeks — see [The build](#the-build).
 
@@ -366,6 +365,51 @@ and SQLAlchemy queries on in-memory SQLite.
 
 ---
 
+## Coach
+
+Provider-agnostic, running on a free tier. The model never computes anything —
+it paraphrases a `CoachContext` that was fully computed first, and every number
+it prints is checked before the athlete sees it.
+
+### The verifier
+
+`coach/verify.py` extracts every numeric token from the response and asserts
+membership in a set derived from the context: each scalar at any depth, plus the
+formattings the API itself emits (seconds to `m:ss` and `h:mm:ss`, metres to
+kilometres, fractions to percentages) and any figure spelled out in the
+context's own strings. Fail once, retry with the offending tokens named. Fail
+twice, return `templated_summary`, which is assembled from the context directly
+and therefore passes by construction.
+
+A prompt instruction is not a control. This is:
+
+```
+"You are 68 seconds off the goal."   -> rejected
+```
+
+7268 − 7200 = 68 is arithmetically correct and still refused, because the coach
+does not compute. That test is in `tests/test_coach.py`.
+
+### Why streaming was dropped
+
+The spec said stream to the client. It does not, and the reason is structural:
+verification needs the complete response before any of it can be trusted, so
+streaming raw output would mean showing text the guard has not cleared — and
+possibly retracting it mid-sentence. The guard is the whole justification for
+using a free-tier model, so it wins over the typing effect.
+
+### Cost
+
+A rejected answer costs a second call, so one question can be two requests. At
+Groq's 30 RPM / 1000 RPD that is nowhere near binding for one athlete, but it is
+why the fallback exists rather than retrying indefinitely.
+
+`GET /api/coach/context` returns the exact object the model is given, and
+`POST /api/coach/reverify/{id}` re-runs the guard over a stored answer against
+its own snapshot — a coach whose inputs cannot be inspected cannot be audited.
+
+---
+
 ## Adaptation
 
 Six rules, run on every ingest and readable at `GET /api/plan/adaptations`.
@@ -457,8 +501,8 @@ here because the coach never computes numbers. See
       curve, fitness/fatigue, gap list, activity table. Read-only.
 - [x] **M4 — Planner.** Deterministic engine, pace derivation, phase templates,
       plan versioning, activity reconciliation, session detail and completion.
-- [ ] **M5 — Coach.** CoachContext, prompt, verifier, chat UI. Ship the verifier
-      in the same PR as the model call.
+- [x] **M5 — Coach.** CoachContext, prompt contract, numeric verifier, chat UI.
+      Verifier shipped with the model call, as specified.
 - [x] **M6 — Adaptation.** Background sync, six deterministic adaptation rules,
       weekly digest. Plan versioning shipped with M4.
 - [ ] **M7 — Streams.** Lazy stream fetch, per-run charts, aerobic decoupling.
