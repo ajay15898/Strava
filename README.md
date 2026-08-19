@@ -390,6 +390,37 @@ A prompt instruction is not a control. This is:
 7268 − 7200 = 68 is arithmetically correct and still refused, because the coach
 does not compute. That test is in `tests/test_coach.py`.
 
+### What the guard does not do
+
+It proves a number is real. It cannot prove the sentence around it is right.
+
+Every mislabel found in testing traced back to an ambiguous field name in the
+context rather than to model error: `weekly_km_overall` was reported as "this
+week", and `current_weekly_km` — which is fed the *four-week average* — was too.
+Both were renamed. If the coach describes a number wrongly, look at what the
+field is called before blaming the model.
+
+### Display-first context
+
+The context carries `"2:01:08"`, not `7268`; `15.01` km, not `15008.8` m. Asking
+the model to "prefer readable units" did not work — it kept printing raw seconds
+however the prompt was worded. Removing raw SI from the context makes that
+structurally impossible instead, which is the same principle as the verifier:
+do not ask, make it so. It also cut the payload from ~1800 to ~1270 tokens,
+which matters against the ceiling below.
+
+### The real rate limit
+
+Groq allows 1000 requests a day but only **8000 tokens per minute**, and the
+binding constraint is the second one. At ~1270 tokens a call, a question plus
+its verifier retry spends ~2550, so two questions in quick succession will hit
+the ceiling long before the request cap. The context is kept lean and
+serialised without indentation for that reason.
+
+Model ids churn: `llama-3.3-70b-versatile` was Groq's headline model when this
+was written and had been retired before the first call. Query `GET /v1/models`
+before trusting any id.
+
 ### Why streaming was dropped
 
 The spec said stream to the client. It does not, and the reason is structural:

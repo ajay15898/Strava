@@ -9,9 +9,12 @@ free-tier model here, so it wins over the typing effect. The client can animate
 the verified text if the feel matters.
 
 **On cost.** A rejected answer costs a second call, so one question can be two
-requests against the rate limit. At Groq's 30 RPM / 1000 RPD that is not close
-to binding for one athlete, but it is why the fallback exists rather than
-retrying indefinitely.
+requests. The binding limit turned out not to be requests at all: Groq allows
+1000 requests a day but only **8000 tokens per minute**, and this context is
+~1500 tokens per call, so a question plus its retry spends ~3000. Two questions
+in quick succession will hit the ceiling before they come close to the request
+cap. That is why the context is kept lean and serialised without indentation,
+and why the fallback exists rather than retrying indefinitely.
 """
 
 from __future__ import annotations
@@ -73,7 +76,15 @@ def _call_model(messages: list[dict]) -> str:
         raise CoachUnavailable(f"Could not reach the coach provider: {exc}") from exc
 
     if response.status_code == 429:
-        raise CoachUnavailable("Coach provider rate limit reached. Try again shortly.")
+        # Groq's binding limit is tokens per minute, not requests, and a
+        # verifier retry doubles the spend on one question. Say how long.
+        wait = response.headers.get("retry-after") or response.headers.get(
+            "x-ratelimit-reset-tokens", "a moment"
+        )
+        raise CoachUnavailable(
+            f"Coach provider rate limit reached (tokens per minute). "
+            f"Try again in {wait}."
+        )
     if response.status_code >= 400:
         raise CoachUnavailable(
             f"Coach provider returned {response.status_code}: {response.text[:200]}"

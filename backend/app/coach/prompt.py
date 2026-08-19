@@ -42,7 +42,7 @@ def build_messages(context: dict, question: str, history: list[dict] | None = No
         {"role": "system", "content": SYSTEM_PROMPT},
         {
             "role": "system",
-            "content": "CONTEXT:\n" + json.dumps(context, indent=1, default=str),
+            "content": "CONTEXT:\n" + json.dumps(context, separators=(",", ":"), default=str),
         },
     ]
     messages.extend(history or [])
@@ -63,22 +63,20 @@ def retry_instruction(violations: str) -> dict:
     }
 
 
-def _fmt_time(seconds: float | None) -> str:
-    if not seconds:
-        return "unknown"
-    s = int(round(seconds))
-    h, rem = divmod(s, 3600)
-    m, sec = divmod(rem, 60)
-    return f"{h}:{m:02d}:{sec:02d}" if h else f"{m}:{sec:02d}"
-
-
 def templated_summary(context: dict) -> str:
     """Deterministic answer, assembled from the context with no model call.
 
-    Used when the model twice fails the numeric check. Every value here comes
+    Used when the model twice fails the numeric check. Every value comes
     straight from the context, so it passes verification by construction.
+
+    Reads the display-formatted fields, which is also why `missing` is tracked:
+    when the context shape changed underneath this function it degraded to
+    "unknown" and "None" — and the verifier passed it, because absent text has
+    no numbers to object to. A guard against fabrication is not a guard against
+    emptiness, so that has to be checked separately.
     """
     lines: list[str] = []
+    missing: list[str] = []
 
     fitness = context.get("fitness") or {}
     prediction = context.get("prediction") or {}
@@ -86,20 +84,28 @@ def templated_summary(context: dict) -> str:
     plan = context.get("plan") or {}
     athlete = context.get("athlete") or {}
 
-    if prediction and feasibility:
+    predicted = prediction.get("predicted_finish_time")
+    goal = athlete.get("goal_time")
+    if predicted and goal:
         lines.append(
-            f"Projected {_fmt_time(prediction.get('predicted_time_s'))} for the half "
-            f"marathon against a goal of {_fmt_time(athlete.get('goal_time_s'))}. "
-            f"The engine calls this {feasibility.get('verdict')}, limited by "
-            f"{str(feasibility.get('limiting_factor', '')).replace('_', ' ')}."
+            f"Projected {predicted} for the half marathon against a goal of {goal}. "
+            f"The engine calls this {feasibility.get('verdict', 'unrated')}, limited by "
+            f"{feasibility.get('limiting_factor', 'nothing in particular')}."
         )
+    else:
+        missing.append("prediction")
 
-    if fitness:
+    two_wk = fitness.get("avg_km_per_week_last_2_weeks")
+    four_wk = fitness.get("avg_km_per_week_last_4_weeks")
+    longest = fitness.get("longest_run_ever_km")
+    if two_wk is not None and four_wk is not None:
         lines.append(
-            f"Recent volume is {fitness.get('weekly_km_2wk')} km/week over the last two "
-            f"weeks and {fitness.get('weekly_km_4wk')} km/week over four. Longest run "
-            f"on record is {round((fitness.get('longest_run_m') or 0) / 1000, 2)} km."
+            f"Recent volume is {two_wk} km/week over the last two weeks and "
+            f"{four_wk} km/week over four."
+            + (f" Longest run on record is {longest} km." if longest else "")
         )
+    else:
+        missing.append("volume")
 
     if plan.get("this_week"):
         done = sum(1 for s in plan["this_week"] if s.get("status") == "done")
@@ -108,10 +114,15 @@ def templated_summary(context: dict) -> str:
             f"{done} of {len(plan['this_week'])} sessions completed."
         )
 
-    adaptations = context.get("adaptations") or []
-    actionable = [a for a in adaptations if a.get("severity") in {"action", "warning"}]
+    actionable = [
+        a for a in (context.get("adaptations") or [])
+        if a.get("severity") in {"action", "warning"}
+    ]
     if actionable:
         lines.append("Open flags: " + " ".join(a["message"] for a in actionable))
+
+    if missing:
+        lines.append(f"No data available for: {', '.join(missing)}.")
 
     lines.append(
         "This is a generated summary — the coaching model could not answer within "

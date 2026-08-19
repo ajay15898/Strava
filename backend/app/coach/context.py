@@ -24,6 +24,44 @@ from app.models import Athlete
 from app.planner import adapt, service as plan_service
 
 
+# --- display formatting ---------------------------------------------------
+# The context carries human-readable values, not raw SI. Telling a model to
+# "prefer readable units" does not work — gpt-oss-120b kept printing 7268 s and
+# 15008.8 m no matter how the prompt was worded. Removing raw seconds and
+# metres from the context makes that structurally impossible instead, which is
+# the same principle as the verifier: do not ask, make it so.
+
+
+def _hms(seconds: float | None) -> str | None:
+    if seconds is None:
+        return None
+    s = int(round(seconds))
+    h, rem = divmod(s, 3600)
+    m, sec = divmod(rem, 60)
+    return f"{h}:{m:02d}:{sec:02d}" if h else f"{m}:{sec:02d}"
+
+
+def _pace(seconds_per_km: float | None) -> str | None:
+    if not seconds_per_km:
+        return None
+    s = int(round(seconds_per_km))
+    return f"{s // 60}:{s % 60:02d}"
+
+
+def _km(metres: float | None, digits: int = 2) -> float | None:
+    return None if metres is None else round(metres / 1000, digits)
+
+
+def _band(low: float | None, high: float | None) -> str | None:
+    if not low or not high:
+        return None
+    return f"{_pace(low)}-{_pace(high)}"
+
+
+def _humanise(value: str | None) -> str | None:
+    return None if value is None else value.replace("_", " ")
+
+
 def build(db: Session, athlete: Athlete, *, today: date | None = None) -> dict:
     today = today or date.today()
 
@@ -48,10 +86,30 @@ def build(db: Session, athlete: Athlete, *, today: date | None = None) -> dict:
     if prediction is not None:
         context["prediction"] = _prediction_block(prediction)
         if athlete.goal_time_s:
-            feasibility = predict.assess(
-                prediction, athlete.goal_time_s, report.km_per_week_4wk
+            feasibility = asdict(
+                predict.assess(prediction, athlete.goal_time_s, report.km_per_week_4wk)
             )
-            context["feasibility"] = asdict(feasibility)
+            # `required_weekly_peak_km` is a generic half-marathon guideline that
+            # the prediction path never reads. Left under that name the model
+            # presents it as a hard requirement, so it is renamed here to say
+            # what it actually is.
+            feasibility["typical_hm_peak_guideline_km"] = feasibility.pop(
+                "required_weekly_peak_km"
+            )
+            feasibility["predicted_finish_time"] = _hms(
+                feasibility.pop("predicted_time_s")
+            )
+            feasibility["limiting_factor"] = _humanise(feasibility["limiting_factor"])
+            # `current_weekly_km` is fed the *four-week average*, not this
+            # week's mileage. Under that name the model reasonably reported it
+            # as "this week". Every mislabel found so far has traced back to an
+            # ambiguous field name here rather than to model error — the
+            # verifier proves a number is real, never that it means what the
+            # sentence around it claims.
+            feasibility["avg_km_per_week_last_4_weeks"] = feasibility.pop(
+                "current_weekly_km"
+            )
+            context["feasibility"] = feasibility
 
     plan = plan_service.current_plan(db, athlete.id)
     if plan is not None:
@@ -72,11 +130,16 @@ def _athlete_block(athlete: Athlete, today: date) -> dict:
 
     return {
         "name": athlete.name,
-        "goal_race_distance_m": athlete.goal_race_distance_m,
-        "goal_time_s": athlete.goal_time_s,
+        "goal_race_distance_km": _km(athlete.goal_race_distance_m, 1),
+        "goal_time": _hms(athlete.goal_time_s),
+        "goal_pace_per_km": _pace(
+            athlete.goal_time_s / (athlete.goal_race_distance_m / 1000)
+            if athlete.goal_time_s and athlete.goal_race_distance_m
+            else None
+        ),
         "goal_race_date": athlete.goal_race_date.isoformat() if athlete.goal_race_date else None,
         "weeks_out": weeks_out,
-        "max_sessions_per_week": athlete.max_sessions_per_week,
+        "runs_per_week": athlete.max_sessions_per_week,
     }
 
 
@@ -86,13 +149,13 @@ def _fitness_block(db, athlete, runs, report, today) -> dict:
     best = {p.effort_type: p.duration_s for p in points}
 
     return {
-        "total_km": report.total_km,
-        "total_run_days": report.total_run_days,
-        "weekly_km_2wk": report.km_per_week_2wk,
-        "weekly_km_4wk": report.km_per_week_4wk,
-        "weekly_km_overall": report.km_per_week_overall,
-        "longest_run_m": round(max(r.distance_m for r in runs), 1),
-        "best_efforts_s": best,
+        "total_km_all_time": report.total_km,
+        "total_run_days_all_time": report.total_run_days,
+        "avg_km_per_week_last_2_weeks": report.km_per_week_2wk,
+        "avg_km_per_week_last_4_weeks": report.km_per_week_4wk,
+        "avg_km_per_week_all_time": report.km_per_week_overall,
+        "longest_run_ever_km": _km(max(r.distance_m for r in runs)),
+        "best_efforts": {k: _hms(v) for k, v in best.items()},
         "ctl": current.ctl if current else None,
         "atl": current.atl if current else None,
         "tsb": current.tsb if current else None,
@@ -102,14 +165,19 @@ def _fitness_block(db, athlete, runs, report, today) -> dict:
     }
 
 
-def _recent_activities(runs, limit: int = 10) -> list[dict]:
+#: Enough to discuss the last fortnight without spending the token budget
+#: on history the athlete can already see in the activity table.
+RECENT_ACTIVITY_LIMIT = 6
+
+
+def _recent_activities(runs, limit: int = RECENT_ACTIVITY_LIMIT) -> list[dict]:
     return [
         {
             "date": r.start_local.date().isoformat(),
             "name": r.name,
-            "distance_m": round(r.distance_m, 1),
-            "moving_time_s": r.moving_time_s,
-            "pace_s_per_km": round(r.moving_time_s / (r.distance_m / 1000), 1),
+            "distance_km": _km(r.distance_m),
+            "duration": _hms(r.moving_time_s),
+            "pace_per_km": _pace(r.moving_time_s / (r.distance_m / 1000)),
             "avg_hr": r.avg_hr,
         }
         for r in sorted(runs, key=lambda a: a.start_local, reverse=True)[:limit]
@@ -120,27 +188,28 @@ def _compliance_block(report) -> dict:
     return {
         "weekly_km_last_8": [round(w.km, 1) for w in report.weeks],
         "run_days_last_8": [w.run_days for w in report.weeks],
+        "gap_count": len(report.gaps),
         "longest_gap_days": report.longest_gap_days,
-        "gaps": [
+        # Only the recent ones — older gaps are history, not decisions.
+        "recent_gaps": [
             {"start": g.start.isoformat(), "end": g.end.isoformat(), "days": g.days}
-            for g in report.gaps
+            for g in report.gaps[-3:]
         ],
     }
 
 
 def _prediction_block(p) -> dict:
     return {
-        "predicted_time_s": p.predicted_time_s,
-        "predicted_pace_s_per_km": round(p.predicted_pace_s_per_km, 1),
-        "riegel_s": p.riegel_s,
-        "cameron_s": p.cameron_s,
-        "blended_s": p.blended_s,
-        "durability_ratio": p.durability_ratio,
+        "predicted_finish_time": _hms(p.predicted_time_s),
+        "predicted_pace_per_km": _pace(p.predicted_pace_s_per_km),
+        "riegel_estimate": _hms(p.riegel_s),
+        "cameron_estimate": _hms(p.cameron_s),
+        "blended_before_penalty": _hms(p.blended_s),
+        "durability_ratio_longest_run_over_race": p.durability_ratio,
         "durability_penalty_pct": p.durability_penalty_pct,
-        "reference_effort_type": p.reference_effort_type,
-        "reference_duration_s": p.reference_duration_s,
-        "reference_date": p.reference_date.isoformat(),
-        "longest_run_m": round(p.longest_run_m, 1),
+        "based_on_effort": p.reference_effort_type,
+        "based_on_time": _hms(p.reference_duration_s),
+        "based_on_date": p.reference_date.isoformat(),
     }
 
 
@@ -165,20 +234,21 @@ def _plan_block(db, athlete, plan, today: date) -> dict:
         "weeks": plan.weeks,
         "current_week_no": week_no,
         "peak_weekly_km": meta.get("peak_weekly_km"),
-        "peak_long_run_m": meta.get("peak_long_run_m"),
+        "peak_long_run_km": _km(meta.get("peak_long_run_m"), 1),
         "total_km": meta.get("total_km"),
         "warnings": meta.get("warnings", []),
-        "paces": meta.get("paces", {}),
+        "prescribed_paces_per_km": {
+            name: _band(v.get("low"), v.get("high"))
+            for name, v in (meta.get("paces") or {}).items()
+        },
         "session_status_counts": counts,
         "this_week": [
             {
                 "date": s.date.isoformat(),
                 "session_type": s.session_type,
-                "target_distance_m": s.target_distance_m,
-                "target_pace_low": s.target_pace_low,
-                "target_pace_high": s.target_pace_high,
+                "target_distance_km": _km(s.target_distance_m, 1),
+                "target_pace_per_km": _band(s.target_pace_low, s.target_pace_high),
                 "status": s.status,
-                "notes": s.notes,
             }
             for s in this_week
         ],

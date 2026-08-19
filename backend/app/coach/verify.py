@@ -78,6 +78,12 @@ def _collect_text_tokens(node: object) -> tuple[set[str], set[str]]:
 
     def harvest(text: str) -> None:
         clocks.update(CLOCK.findall(text))
+        # A date in the context legitimises its parts. The model may write
+        # "22 August 2026" or "08/22" rather than the ISO form, and those
+        # digits are a quotation, not an invention.
+        for iso in ISO_DATE.findall(text):
+            year, month, day = iso.split("-")
+            numbers.update({year, month, day, str(int(month)), str(int(day))})
         stripped = CLOCK.sub(" ", ISO_DATE.sub(" ", text))
         numbers.update(NUMBER.findall(stripped))
 

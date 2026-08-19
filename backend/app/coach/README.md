@@ -5,7 +5,7 @@ chat-completions endpoint, selected by three environment variables.
 
 ```
 COACH_BASE_URL   e.g. https://api.groq.com/openai/v1
-COACH_MODEL      e.g. llama-3.3-70b-versatile
+COACH_MODEL      e.g. openai/gpt-oss-120b
 COACH_API_KEY
 ```
 
@@ -31,6 +31,11 @@ violation named before falling back, which halves the effective rate limit.
 
 Reference list: https://github.com/mnfst/awesome-free-llm-apis — community
 maintained, so confirm limits at signup rather than trusting the table.
+
+Model names churn. `llama-3.3-70b-versatile` was Groq's headline model when
+this was written and had been retired by the time the key was first used, so
+the call failed with a 404 naming the missing model. Query `GET /v1/models`
+against the provider before trusting any model id, including this one.
 
 The differentiator for this project is **privacy, not quota**. This is personal
 health data. Google Gemini and Mistral both state prompts may be used to improve

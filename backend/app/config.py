@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     # pre-computed context and is numerically fenced by coach/verify.py, so
     # model capability is a comfort rather than a correctness requirement.
     coach_base_url: str = "https://api.groq.com/openai/v1"
-    coach_model: str = "llama-3.3-70b-versatile"
+    coach_model: str = "openai/gpt-oss-120b"
     coach_api_key: str = ""
     coach_temperature: float = 0.2
     coach_timeout_s: float = 60.0
