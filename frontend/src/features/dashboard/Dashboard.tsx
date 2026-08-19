@@ -281,7 +281,7 @@ export function Dashboard({ mode }: { mode: Mode }) {
         ) : runs.error ? (
           <ErrorState detail={runs.error} status={runs.status} onRetry={runs.reload} />
         ) : runs.data ? (
-          <ActivityTable runs={runs.data} limit={12} />
+          <ActivityTable runs={runs.data} limit={12} mode={mode} />
         ) : null}
       </Panel>
 

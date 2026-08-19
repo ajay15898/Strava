@@ -11,6 +11,8 @@ import type {
   PlanDetail,
   SessionStatus,
   Prediction,
+  RunAnalysis,
+  Split,
   Summary,
 } from "./types";
 
@@ -97,6 +99,10 @@ export const api = {
   reconcilePlan: () => send<PlanDetail>("POST", "/plan/reconcile"),
   setSessionStatus: (id: number, status: SessionStatus) =>
     send<unknown>("PATCH", `/plan/session/${id}`, { status }),
+  splits: (id: number) => get<Split[]>(`/activities/${id}/splits`),
+  analysis: (id: number) => get<RunAnalysis>(`/activities/${id}/analysis`),
+  fetchStreams: (id: number) =>
+    send<{ status: string }>("POST", `/activities/${id}/streams/fetch`),
   activities: (params: { from?: string; to?: string; type?: string; limit?: number } = {}) =>
     get<Activity[]>("/activities", params as Record<string, string | number>),
 };

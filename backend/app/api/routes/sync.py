@@ -45,3 +45,18 @@ def dedup(
 ) -> dict[str, int]:
     """Re-run deduplication across the whole history. Idempotent."""
     return {"duplicates": sync.apply_dedup(db, athlete.id)}
+
+
+@router.post("/streams")
+def backfill_streams(
+    limit: int = 10,
+    athlete: Athlete = Depends(current_athlete),
+    db: Session = Depends(get_db),
+) -> dict[str, int]:
+    """Fetch streams for runs that lack them, newest first.
+
+    Bounded by `limit`: Strava allows only 100 reads per fifteen minutes, and
+    49 runs are eligible, so an unbounded backfill would burn half a window on
+    data nobody has opened yet.
+    """
+    return sync.backfill_streams(db, athlete, limit=limit)

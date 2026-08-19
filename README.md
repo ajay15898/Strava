@@ -5,7 +5,7 @@ model, and runs an AI coaching layer on top of a deterministic training engine.
 
 **Goal:** half marathon under 2:00:00 (5:41/km sustained for 21.1 km).
 
-**Status:** M1–M6 are built. M7 (streams) is not started.
+**Status:** M1–M7 are built.
 
 **Race:** 2026-10-04. Seven weeks — see [The build](#the-build).
 
@@ -365,6 +365,32 @@ and SQLAlchemy queries on in-memory SQLite.
 
 ---
 
+## Within-run analysis
+
+`laps` is ignored: this athlete never presses the lap button, so every activity
+reports exactly one lap spanning the whole run and carries no within-run
+information. `splits_metric` gives clean per-kilometre splits instead, and that
+is what the pace chart and fade analysis read.
+
+**Decoupling** compares output per heartbeat between the two halves of a run.
+Positive means the second half cost more heartbeats for the same output.
+Preferred form is **Pw:HR** — the watch records real running power on every
+activity — falling back to **Pa:HR** where power is absent. Above 5%, aerobic
+durability is the limiter.
+
+Until heart rate arrives it returns `None` with a reason attached, never a
+fabricated zero: a missing measurement and a good measurement must not look
+alike. Heart rate started recording 2026-08-18, so decoupling lights up from
+the first run after that and stays blank for the 155 activities before it.
+
+**Streams are fetched on demand**, not speculatively. One request per activity
+against a 100-per-15-minutes ceiling, with 49 runs eligible, so an unbounded
+backfill would burn half a window on data nobody has opened. `POST
+/api/sync/streams?limit=N` is bounded, and opening a run in the UI fetches just
+that one.
+
+---
+
 ## Coach
 
 Provider-agnostic, running on a free tier. The model never computes anything —
@@ -536,7 +562,8 @@ here because the coach never computes numbers. See
       Verifier shipped with the model call, as specified.
 - [x] **M6 — Adaptation.** Background sync, six deterministic adaptation rules,
       weekly digest. Plan versioning shipped with M4.
-- [ ] **M7 — Streams.** Lazy stream fetch, per-run charts, aerobic decoupling.
+- [x] **M7 — Streams.** Lazy stream fetch, per-kilometre splits, pace chart,
+      aerobic decoupling (Pw:HR and Pa:HR), split fade.
 
 Not yet built, deferred deliberately from M1: **webhooks**
 (`/api/webhooks/strava`, `hub.challenge` echo). The build order places them

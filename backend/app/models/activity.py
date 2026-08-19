@@ -67,6 +67,9 @@ class Activity(Base):
     best_efforts: Mapped[list["BestEffort"]] = relationship(
         back_populates="activity", cascade="all, delete-orphan"
     )
+    splits: Mapped[list["ActivitySplit"]] = relationship(
+        back_populates="activity", cascade="all, delete-orphan"
+    )
 
     __table_args__ = (Index("ix_activity_athlete_start", "athlete_id", "start_local"),)
 
@@ -116,6 +119,40 @@ class BestEffort(Base):
     __table_args__ = (
         UniqueConstraint("activity_id", "effort_type", name="uq_effort_activity_type"),
     )
+
+
+class ActivitySplit(Base):
+    """A per-kilometre split from Strava's `splits_metric`.
+
+    Preferred over `laps`, which is a manual-button artefact: this athlete has
+    exactly one lap per run, so laps carry no within-run information at all.
+    """
+
+    __tablename__ = "activity_split"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    activity_id: Mapped[int] = mapped_column(
+        ForeignKey("activity.id", ondelete="CASCADE"), index=True
+    )
+    split_index: Mapped[int] = mapped_column(Integer)
+    distance_m: Mapped[float] = mapped_column(Float)
+    elapsed_time_s: Mapped[int] = mapped_column(Integer)
+    moving_time_s: Mapped[int] = mapped_column(Integer)
+    elevation_diff_m: Mapped[float | None] = mapped_column(Float)
+    avg_speed: Mapped[float | None] = mapped_column(Float)
+    avg_hr: Mapped[float | None] = mapped_column(Float)
+
+    activity: Mapped[Activity] = relationship(back_populates="splits")
+
+    __table_args__ = (
+        UniqueConstraint("activity_id", "split_index", name="uq_split_activity_index"),
+    )
+
+    @property
+    def pace_s_per_km(self) -> float | None:
+        if self.distance_m <= 0 or self.moving_time_s <= 0:
+            return None
+        return self.moving_time_s / (self.distance_m / 1000.0)
 
 
 class DailyLoad(Base):

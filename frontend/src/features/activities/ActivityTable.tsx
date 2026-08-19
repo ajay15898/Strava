@@ -1,14 +1,26 @@
 import { motion } from "framer-motion";
-import { HeartBreak } from "@phosphor-icons/react";
+import { CaretRight, HeartBreak } from "@phosphor-icons/react";
+import { useState } from "react";
 
 import { EmptyState } from "../../components/States";
 import { hms, km, mediumDate, pace } from "../../lib/format";
+import type { Mode } from "../../lib/theme";
+import { RunDetail } from "./RunDetail";
 import type { Activity } from "../../api/types";
 
 /** Rows separated by hairlines rather than boxed in cards — at this count the
  *  boxes would be pure chrome. */
-export function ActivityTable({ runs, limit }: { runs: Activity[]; limit?: number }) {
+export function ActivityTable({
+  runs,
+  limit,
+  mode,
+}: {
+  runs: Activity[];
+  limit?: number;
+  mode: Mode;
+}) {
   const rows = limit ? runs.slice(0, limit) : runs;
+  const [open, setOpen] = useState<number | null>(null);
 
   if (rows.length === 0) {
     return (
@@ -32,19 +44,22 @@ export function ActivityTable({ runs, limit }: { runs: Activity[]; limit?: numbe
             <th className="pb-2.5 text-right font-medium">Distance</th>
             <th className="pb-2.5 text-right font-medium">Time</th>
             <th className="pb-2.5 text-right font-medium">Pace</th>
+            <th className="pb-2.5" />
           </tr>
         </thead>
         <tbody>
-          {rows.map((r, i) => {
+          {rows.flatMap((r, i) => {
             const paceS = r.moving_time_s / (r.distance_m / 1000);
-            return (
+            const isOpen = open === r.id;
+            return [
               <motion.tr
                 key={r.id}
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 transition={{ delay: Math.min(i * 0.025, 0.4), duration: 0.3 }}
-                className="border-b transition-colors last:border-b-0"
+                className="cursor-pointer border-b transition-colors last:border-b-0"
                 style={{ borderColor: "var(--border-hairline)" }}
+                onClick={() => setOpen(isOpen ? null : r.id)}
               >
                 <td
                   className="py-3 text-[13px] whitespace-nowrap"
@@ -83,8 +98,28 @@ export function ActivityTable({ runs, limit }: { runs: Activity[]; limit?: numbe
                 >
                   {pace(paceS)}
                 </td>
-              </motion.tr>
-            );
+                <td className="py-3 pl-2 text-right">
+                  <CaretRight
+                    size={13}
+                    weight="bold"
+                    style={{
+                      color: "var(--text-muted)",
+                      transform: isOpen ? "rotate(90deg)" : undefined,
+                      transition: "transform 200ms cubic-bezier(0.16, 1, 0.3, 1)",
+                    }}
+                  />
+                </td>
+              </motion.tr>,
+              ...(isOpen
+                ? [
+                    <tr key={`${r.id}-detail`}>
+                      <td colSpan={6} className="px-1">
+                        <RunDetail activityId={r.id} mode={mode} />
+                      </td>
+                    </tr>,
+                  ]
+                : []),
+            ];
           })}
         </tbody>
       </table>

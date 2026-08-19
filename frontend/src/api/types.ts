@@ -204,3 +204,33 @@ export interface CoachMessage {
   content: string;
   created_at: string;
 }
+
+export interface Split {
+  split_index: number;
+  distance_m: number;
+  moving_time_s: number;
+  elapsed_time_s: number;
+  pace_s_per_km: number | null;
+  elevation_diff_m: number | null;
+  avg_hr: number | null;
+}
+
+export interface RunAnalysis {
+  activity_id: number;
+  has_streams: boolean;
+  available_streams: string[];
+  decoupling: {
+    pct: number | null;
+    method: string;
+    is_concerning: boolean;
+    reason: string | null;
+  };
+  split_fade: {
+    first_km_pace_s: number | null;
+    last_km_pace_s: number | null;
+    fade_pct: number | null;
+    fastest_km: number | null;
+    slowest_km: number | null;
+    negative_split: boolean | null;
+  };
+}

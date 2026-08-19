@@ -18,7 +18,7 @@ from app.constants import (
     DUPLICATE_WINDOW_S,
     RUN_SPORT_TYPES,
 )
-from app.models import Activity, Athlete, BestEffort
+from app.models import Activity, ActivitySplit, ActivityStream, Athlete, BestEffort
 from app.strava.client import StravaClient
 from app.strava.oauth import valid_access_token
 
@@ -236,6 +236,129 @@ def store_best_efforts(db: Session, activity: Activity, detail: dict[str, Any]) 
     return stored
 
 
+def store_splits(db: Session, activity: Activity, detail: dict[str, Any]) -> int:
+    """Per-kilometre splits from `splits_metric`.
+
+    `laps` is deliberately ignored: this athlete never presses the lap button,
+    so every activity reports exactly one lap spanning the whole run, which
+    carries no within-run information.
+    """
+    splits = detail.get("splits_metric") or []
+    stored = 0
+    for index, raw in enumerate(splits, start=1):
+        existing = db.scalar(
+            select(ActivitySplit).where(
+                ActivitySplit.activity_id == activity.id,
+                ActivitySplit.split_index == index,
+            )
+        )
+        if existing is None:
+            existing = ActivitySplit(activity_id=activity.id, split_index=index)
+            db.add(existing)
+        existing.distance_m = float(raw.get("distance") or 0.0)
+        existing.elapsed_time_s = int(raw.get("elapsed_time") or 0)
+        existing.moving_time_s = int(raw.get("moving_time") or 0)
+        existing.elevation_diff_m = raw.get("elevation_difference")
+        existing.avg_speed = raw.get("average_speed")
+        existing.avg_hr = raw.get("average_heartrate")
+        stored += 1
+    return stored
+
+
+#: Streams are the expensive call — one request per activity, and the payload
+#: is orders of magnitude larger than a summary. Fetched only on demand, and
+#: only for runs long enough for within-run analysis to say anything.
+STREAM_MIN_DISTANCE_M = 3000.0
+STREAM_KEYS = [
+    "time",
+    "distance",
+    "heartrate",
+    "velocity_smooth",
+    "altitude",
+    "cadence",
+    "watts",
+    "moving",
+]
+
+
+def has_streams(db: Session, activity_id: int) -> bool:
+    return db.scalar(
+        select(ActivityStream.id).where(ActivityStream.activity_id == activity_id).limit(1)
+    ) is not None
+
+
+def fetch_streams(
+    db: Session, athlete: Athlete, activity: Activity, *, client: StravaClient | None = None
+) -> int:
+    """Fetch and store the raw streams for one activity. Idempotent."""
+    owned = client is None
+    if client is None:
+        client = StravaClient(valid_access_token(db, athlete))
+
+    try:
+        payload = client.streams(activity.strava_id, STREAM_KEYS)
+    except Exception:
+        log.exception("stream fetch failed for %s", activity.strava_id)
+        return 0
+    finally:
+        if owned:
+            client.close()
+
+    stored = 0
+    for key, block in payload.items():
+        data = block.get("data") if isinstance(block, dict) else block
+        if not data:
+            continue
+        existing = db.scalar(
+            select(ActivityStream).where(
+                ActivityStream.activity_id == activity.id, ActivityStream.type == key
+            )
+        )
+        if existing is None:
+            existing = ActivityStream(activity_id=activity.id, type=key)
+            db.add(existing)
+        existing.data = {"data": data}
+        stored += 1
+
+    db.commit()
+    return stored
+
+
+def backfill_streams(db: Session, athlete: Athlete, *, limit: int = 10) -> dict[str, int]:
+    """Fetch streams for runs that do not have them yet, newest first.
+
+    Bounded by `limit` on purpose. Strava allows 1000 reads a day but only 100
+    per fifteen minutes, and a full stream backfill of every eligible run would
+    burn most of a window in one go for data nobody has asked to see yet.
+    """
+    candidates = list(
+        db.scalars(
+            select(Activity)
+            .where(
+                Activity.athlete_id == athlete.id,
+                Activity.is_duplicate.is_(False),
+                Activity.sport_type.in_(RUN_SPORT_TYPES),
+                Activity.distance_m >= STREAM_MIN_DISTANCE_M,
+            )
+            .order_by(Activity.start_local.desc())
+        ).all()
+    )
+
+    fetched = skipped = 0
+    with StravaClient(valid_access_token(db, athlete)) as client:
+        for activity in candidates:
+            if fetched >= limit:
+                break
+            if has_streams(db, activity.id):
+                skipped += 1
+                continue
+            if fetch_streams(db, athlete, activity, client=client):
+                fetched += 1
+
+    log.info("stream backfill: %s fetched, %s already present", fetched, skipped)
+    return {"fetched": fetched, "already_present": skipped, "eligible": len(candidates)}
+
+
 def backfill(
     db: Session,
     athlete: Athlete,
@@ -301,6 +424,7 @@ def fetch_activity_details(db: Session, athlete: Athlete) -> int:
                     continue
                 setattr(activity, key, value)
             store_best_efforts(db, activity, detail)
+            store_splits(db, activity, detail)
             activity.streams_fetched = True
             fetched += 1
             db.commit()
