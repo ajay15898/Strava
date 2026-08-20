@@ -1,8 +1,10 @@
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from app.api.routes import activities, analytics, athlete, auth, coach, plan, sync
 from app.config import get_settings
@@ -53,3 +55,15 @@ def health() -> dict[str, object]:
         "coach_configured": settings.coach_configured,
         "sync": scheduler.last_run,
     }
+
+
+# The built frontend, when there is one.
+#
+# This must stay at the very bottom of the file. Starlette resolves routes in
+# registration order, so a mount at "/" swallows everything registered after
+# it. Declared above the health route, it returned 404 for /api/health while
+# the routers included earlier kept working — a confusing half-failure.
+STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
+if STATIC_DIR.is_dir():
+    app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="ui")
+    logging.getLogger(__name__).info("serving built frontend from %s", STATIC_DIR)

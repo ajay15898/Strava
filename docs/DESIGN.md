@@ -317,3 +317,32 @@ not an inverted light palette.
 
 Identity is never carried by hue alone — the two-series chart ships a legend
 *and* end-of-line direct labels.
+
+
+---
+
+## Deployment
+
+One image, two stages: Node builds the frontend, the Python stage serves the
+built assets alongside the API. That collapses the app onto a single origin,
+which means the browser never makes a cross-origin request in production and
+CORS stops mattering the way it does behind the Vite dev proxy.
+
+Two things this exposed:
+
+**Mount ordering is load-bearing.** Starlette resolves routes in registration
+order, so a `StaticFiles` mount at `/` swallows everything registered after it.
+Declared above the health route, it returned 404 for `/api/health` while the
+routers included earlier kept working — a half-failure that looks like a
+container problem rather than a routing one. The mount now sits at the very
+bottom of `main.py`, with a comment saying why it must stay there.
+
+**Migrations run at start, not at build.** The database does not exist during
+the build, and running them in the entrypoint keeps a fresh volume working
+without a separate manual step. The entrypoint waits for Postgres to accept
+connections first, because `depends_on: service_healthy` covers the container
+being up, not the schema being ready.
+
+`DATABASE_URL` is overridden in compose to point at the `db` service rather
+than localhost, so the same `.env` works for both the container and a
+locally-run backend.

@@ -67,31 +67,43 @@ Nothing in the analytics or planning path is model judgement.
 
 ## Quick start
 
-Requires Docker, Python 3.11+, Node 20+, and a
-[Strava API application](https://www.strava.com/settings/api) with its
-Authorization Callback Domain set to `localhost`.
+Requires Docker and a [Strava API application](https://www.strava.com/settings/api)
+with its Authorization Callback Domain set to `localhost`.
 
 ```bash
 git clone https://github.com/ajay15898/Strava.git && cd Strava
 cp .env.example .env          # add your Strava client id and secret
 
-docker compose up -d db
+docker compose up -d
+```
+
+That is the whole thing. The image builds the frontend and serves it from the
+same container as the API, migrations run on start, and both services carry
+`restart: unless-stopped` so the stack comes back after a reboot and keeps
+syncing whether or not anyone is looking at it.
+
+Open <http://localhost:8000>, connect Strava, then `POST /api/sync/backfill`.
+
+### Developing
+
+Running the pieces separately gives hot reload on both sides:
+
+```bash
+docker compose up -d db       # Postgres only
 
 cd backend
 python -m venv .venv && .venv/Scripts/activate    # or: source .venv/bin/activate
 pip install -e ".[dev]"
 alembic upgrade head
-python -m uvicorn app.main:app --port 8000
+python -m uvicorn app.main:app --reload --port 8000
+
+cd ../frontend && npm install && npm run dev       # http://localhost:5173
 ```
 
-```bash
-cd frontend && npm install && npm run dev
-```
+The Vite dev server proxies `/api` to the backend, so the client stays
+origin-relative in both modes.
 
-Open <http://localhost:5173>, connect Strava, then `POST /api/sync/backfill`.
-
-> The Vite dev server binds to `localhost` (IPv6). `127.0.0.1:5173` will not
-> answer.
+> Vite binds to `localhost` (IPv6). `127.0.0.1:5173` will not answer.
 
 ### The coach (optional)
 
@@ -165,5 +177,6 @@ Not built:
   never detects deleted activities.
 - **Code-splitting.** The frontend bundle is ~835 KB (~246 KB gzipped), mostly
   Recharts and Framer Motion.
-- **Deployment.** Runs locally against Docker Postgres; the backend is not yet
-  containerised.
+- **Remote deployment.** The stack is containerised and survives reboots, but
+  it is only configured for localhost. Running it on a server would need a real
+  hostname in `STRAVA_REDIRECT_URI` and a reverse proxy for TLS.

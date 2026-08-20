@@ -2,11 +2,13 @@ services:
   db:
     image: postgres:16-alpine
     container_name: pace-db
+    restart: unless-stopped
     environment:
       POSTGRES_USER: pace
       POSTGRES_PASSWORD: pace
       POSTGRES_DB: pace
     ports:
+      # Exposed so the local dev backend and psql can reach it too.
       - "5432:5432"
     volumes:
       - pace-pgdata:/var/lib/postgresql/data
@@ -15,6 +17,35 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: pace-app
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      # Inside the compose network the database is `db`, not localhost. This
+      # overrides whatever .env says, so the same .env works for both the
+      # container and a locally-run backend.
+      DATABASE_URL: postgresql+psycopg://pace:pace@db:5432/pace
+      # API and UI are served from one origin now, so the OAuth callback and
+      # the CORS allowance both point at the app itself.
+      FRONTEND_ORIGIN: http://localhost:8000
+      STRAVA_REDIRECT_URI: http://localhost:8000/api/auth/strava/callback
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import httpx,sys; sys.exit(0 if httpx.get('http://localhost:8000/api/health', timeout=5).status_code==200 else 1)\""]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
 
 volumes:
   pace-pgdata:
