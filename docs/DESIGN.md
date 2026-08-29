@@ -193,6 +193,43 @@ The first rule matters as much as the rest. Insisting on a perfect week is how a
 plan gets abandoned, so a single miss produces an informational note and nothing
 else.
 
+### Reconciling what was run against what was planned
+
+Training slips within a week constantly — Wednesday's threshold gets run on
+Friday. A ±1 day match window turned that into a phantom missed session *plus*
+an unattached run, double-counting one disruption.
+
+Matching is therefore scoped to the plan **week**, not to a day window, and
+every plausible pairing is scored before any is assigned:
+
+- distance fit is the primary signal
+- pace separates a threshold run from an easy run of similar length
+- the day gap is weakest, because *which* session was run matters more than when
+
+Pairs are assigned best-score-first across the whole week rather than walking
+sessions in date order, so an early session cannot greedily claim a run that
+fits a later one better. Run on the prescribed day (±1) is `done`; run elsewhere
+in the week is `moved`. Runs the plan never asked for are reported rather than
+dropped.
+
+A run may not reach back into a previous week. That would let last week's
+shortfall be papered over by this week's work, which is exactly what the
+repeat-the-week rule exists to catch.
+
+**The distance tolerance is asymmetric** — 40% under, 25% over. Cutting a
+session short is the normal failure mode; running far over usually means it was
+a different session. A symmetric 25% band left a 12.1 km run unmatched against
+an 18.4 km long run, which was worse than it looked: the shortfall rule only
+inspects *matched* sessions, so the attempt vanished instead of triggering the
+rule written for exactly that case.
+
+Two related bugs the same episode exposed. Completed sessions were filtered with
+`date < today`, hiding anything finished this morning until tomorrow — long
+enough for the plan to step the long run up on a session that had already fallen
+short. And only `done` counted as completion, so a moved session was absent from
+the done tally *and* present in the missed one. `COMPLETED_SESSION_STATUSES` now
+names the set once.
+
 ### Background sync
 
 Webhooks need a publicly reachable callback, which means running a tunnel.

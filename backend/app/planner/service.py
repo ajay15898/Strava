@@ -9,7 +9,7 @@ record of why a week looked the way it did.
 from __future__ import annotations
 
 from dataclasses import asdict
-from datetime import date, timedelta
+from datetime import date
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -27,13 +27,36 @@ from app.planner.engine import (
 )
 from app.planner.phases import pattern_from_config
 
-# A completed run counts as a prescribed session if it lands within this many
-# days of it. One day either side absorbs "I did Sunday's long run on Monday"
-# without letting an unrelated midweek run claim the slot.
-MATCH_WINDOW_DAYS = 1
+# Matching is scoped to the plan week, not to a fixed day window. Training
+# slips within a week constantly — Wednesday's threshold gets run on Friday —
+# and a ±1 day window turns that into a phantom "missed" session *plus* an
+# unattached run, which double-counts the disruption and misreports compliance.
+# A run may not reach across a week boundary to satisfy an earlier week's
+# session: that would let last week's shortfall be papered over by this week's
+# work, which is exactly what the repeat-the-week rule exists to catch.
+#
+# Run on the prescribed day (within this many days) -> "done".
+# Run elsewhere in the same week -> "moved".
+MATCH_SAME_DAY_TOLERANCE_DAYS = 1
 
-# Distance tolerance for calling a session done as prescribed.
-MATCH_DISTANCE_TOLERANCE = 0.20
+# How far a run's distance may sit from the prescription and still count as
+# that session. Deliberately asymmetric: cutting a session short is the normal
+# failure mode, while running far *over* usually means it was a different
+# session entirely.
+#
+# A symmetric 25% band left a 12.1 km run unmatched against an 18.4 km long
+# run, which was worse than it looks: the long-run-shortfall rule only inspects
+# *matched* sessions, so the attempt vanished instead of triggering the rule
+# written for exactly that case.
+MATCH_UNDER_TOLERANCE = 0.40
+MATCH_OVER_TOLERANCE = 0.25
+
+# Scoring weights. Distance is the primary signal; pace separates a threshold
+# run from an easy run of similar length; the day gap is the weakest, because
+# *which* session was run matters more than when.
+MATCH_DISTANCE_WEIGHT = 400.0
+MATCH_PACE_BONUS = 150.0
+MATCH_DAY_GAP_PENALTY = 30.0
 
 
 def snapshot_fitness(db: Session, athlete: Athlete, today: date) -> FitnessSnapshot:
@@ -171,59 +194,107 @@ def sessions_for(db: Session, plan_id: int, week_no: int | None = None) -> list[
     return list(db.scalars(stmt.order_by(PlanSession.date)).all())
 
 
-def reconcile(db: Session, athlete: Athlete, plan: Plan) -> dict[str, int]:
-    """Match completed runs onto prescribed sessions.
+def week_of(plan: Plan, day: date) -> int | None:
+    """Which plan week a date falls in, or None if outside the plan."""
+    if day < plan.start_date:
+        return None
+    week = (day - plan.start_date).days // 7 + 1
+    return week if week <= plan.weeks else None
 
-    Deterministic and re-runnable: it never invents a session and never marks
-    a future session missed, so running it twice changes nothing.
+
+def match_score(session: PlanSession, activity: Activity) -> float | None:
+    """How well a run fits a prescribed session. None means implausible.
+
+    Scored rather than filtered on date, so a 7 km threshold run on Friday
+    claims Wednesday's threshold slot instead of Thursday's 5 km easy one.
+    """
+    if not session.target_distance_m:
+        return None
+
+    ratio = activity.distance_m / session.target_distance_m
+    if not (1 - MATCH_UNDER_TOLERANCE <= ratio <= 1 + MATCH_OVER_TOLERANCE):
+        return None
+
+    score = 1000.0 - abs(1 - ratio) * MATCH_DISTANCE_WEIGHT
+
+    # Pace is what distinguishes session *type* at similar distances.
+    if session.target_pace_low and session.target_pace_high and activity.distance_m > 0:
+        actual = activity.moving_time_s / (activity.distance_m / 1000)
+        if session.target_pace_low <= actual <= session.target_pace_high:
+            score += MATCH_PACE_BONUS
+
+    score -= abs((activity.start_local.date() - session.date).days) * MATCH_DAY_GAP_PENALTY
+    return score
+
+
+def reconcile(db: Session, athlete: Athlete, plan: Plan) -> dict[str, int]:
+    """Match completed runs onto prescribed sessions, within each plan week.
+
+    Deterministic and re-runnable: it never invents a session, never marks a
+    future session missed, and assigns the globally best-scoring pairs first
+    rather than walking sessions in date order — so one early session cannot
+    greedily claim a run that fits a later one far better.
     """
     sessions = sessions_for(db, plan.id)
     if not sessions:
-        return {"done": 0, "missed": 0, "planned": 0}
+        return {"done": 0, "moved": 0, "missed": 0, "planned": 0, "unmatched_runs": 0}
 
     runs = valid_runs(db, athlete.id, plan.start_date, plan.race_date)
-    unclaimed = {r.id: r for r in runs}
     today = date.today()
 
-    counts = {"done": 0, "missed": 0, "planned": 0}
+    # Every plausible pairing inside the same plan week, best first.
+    pairs: list[tuple[float, PlanSession, Activity]] = []
+    for session in sessions:
+        for activity in runs:
+            if week_of(plan, activity.start_local.date()) != session.week_no:
+                continue
+            score = match_score(session, activity)
+            if score is not None:
+                pairs.append((score, session, activity))
 
-    for session in sorted(sessions, key=lambda s: s.date):
-        match = _best_match(session, unclaimed)
-        if match is not None:
-            unclaimed.pop(match.id, None)
-            session.status = "done"
-            session.matched_activity_id = match.id
-            counts["done"] += 1
+    # Ties broken on ids so the result never depends on iteration order.
+    pairs.sort(key=lambda p: (-p[0], p[1].id, p[2].id))
+
+    claimed_sessions: set[int] = set()
+    claimed_runs: set[int] = set()
+    assignment: dict[int, Activity] = {}
+
+    for _, session, activity in pairs:
+        if session.id in claimed_sessions or activity.id in claimed_runs:
+            continue
+        claimed_sessions.add(session.id)
+        claimed_runs.add(activity.id)
+        assignment[session.id] = activity
+
+    counts = {"done": 0, "moved": 0, "missed": 0, "planned": 0, "unmatched_runs": 0}
+
+    for session in sessions:
+        activity = assignment.get(session.id)
+        if activity is not None:
+            gap = abs((activity.start_local.date() - session.date).days)
+            session.status = "done" if gap <= MATCH_SAME_DAY_TOLERANCE_DAYS else "moved"
+            session.matched_activity_id = activity.id
+            counts[session.status] += 1
         elif session.date < today:
             session.status = "missed"
             session.matched_activity_id = None
             counts["missed"] += 1
         else:
             session.status = "planned"
+            session.matched_activity_id = None
             counts["planned"] += 1
+
+    # Runs the plan did not ask for. Surfaced rather than dropped: extra
+    # training is still training, and silently ignoring it makes the weekly
+    # digest understate what was actually done.
+    counts["unmatched_runs"] = sum(
+        1
+        for r in runs
+        if r.id not in claimed_runs and r.start_local.date() <= today
+    )
 
     db.commit()
     return counts
-
-
-def _best_match(session: PlanSession, candidates: dict[int, Activity]) -> Activity | None:
-    window = timedelta(days=MATCH_WINDOW_DAYS)
-    best: Activity | None = None
-    best_gap: float | None = None
-
-    for activity in candidates.values():
-        day = activity.start_local.date()
-        if abs(day - session.date) > window:
-            continue
-        if session.target_distance_m:
-            ratio = activity.distance_m / session.target_distance_m
-            if not (1 - MATCH_DISTANCE_TOLERANCE <= ratio <= 1 + MATCH_DISTANCE_TOLERANCE):
-                continue
-        gap = abs((day - session.date).days)
-        if best_gap is None or gap < best_gap:
-            best, best_gap = activity, gap
-
-    return best
 
 
 def as_dict(generated: GeneratedPlan) -> dict:

@@ -198,3 +198,22 @@ def test_one_disciplined_run_breaks_the_streak():
     sessions.insert(1, session(day=mid_day, kind="easy", status="done", activity_id=999, week=1))
     acts[999] = activity(aid=999, day=mid_day, distance_m=5000.0, moving_s=int(405 * 5))
     assert rule_easy_pace_discipline(sessions, acts, TODAY) is None
+
+
+def test_a_session_completed_today_is_visible_to_the_rules():
+    """A run finished this morning is finished.
+
+    Filtering completed sessions with `< today` hid it until tomorrow, which
+    delayed the shortfall rule past the point where it could stop the next
+    long-run step up.
+    """
+    target = 18400.0
+    s = session(
+        day=TODAY, kind="long", status="done", target_m=target, activity_id=7
+    )
+    acts = {7: activity(aid=7, day=TODAY, distance_m=12110.0, moving_s=4600)}
+
+    out = rule_long_run_shortfall([s], acts, TODAY)
+    assert out is not None
+    assert out.action == "hold_long_run"
+    assert out.data["shortfall"] == pytest.approx(0.342, abs=0.01)

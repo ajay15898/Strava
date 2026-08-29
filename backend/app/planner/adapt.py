@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session
 from app.analytics import load as load_mod
 from app.analytics.base import valid_runs
 from app.constants import (
+    COMPLETED_SESSION_STATUSES,
     EASY_PACE_STREAK,
     GOAL_PACE_ADVANCE_S,
     GOAL_PACE_ADVANCE_WEEKS,
@@ -137,13 +138,19 @@ def rule_layoff(runs: list[Activity], today: date) -> Adaptation | None:
 def rule_long_run_shortfall(
     sessions: list[PlanSession], activities: dict[int, Activity], today: date
 ) -> Adaptation | None:
-    """A long run well under target means the next step up is not earned."""
+    """A long run well under target means the next step up is not earned.
+
+    Completed sessions are filtered with `<= today`, not `<`. A run finished
+    this morning is finished, and excluding it delayed this rule by a day —
+    long enough for the plan to step the long run up on a session that had
+    already fallen short.
+    """
     completed = [
         s
         for s in sessions
         if s.session_type == "long"
-        and s.date < today
-        and s.status == "done"
+        and s.date <= today
+        and s.status in COMPLETED_SESSION_STATUSES
         and s.matched_activity_id
         and s.target_distance_m
     ]
@@ -190,8 +197,8 @@ def rule_easy_pace_discipline(
             s
             for s in sessions
             if s.session_type == "easy"
-            and s.date < today
-            and s.status == "done"
+            and s.date <= today
+            and s.status in COMPLETED_SESSION_STATUSES
             and s.matched_activity_id
             and s.target_pace_high
         ),
@@ -262,8 +269,8 @@ def rule_goal_pace_progression(
         s
         for s in sessions
         if s.session_type == "goal_pace"
-        and s.date < today
-        and s.status == "done"
+        and s.date <= today
+        and s.status in COMPLETED_SESSION_STATUSES
         and s.matched_activity_id
         and s.target_pace_high
     ]
@@ -342,7 +349,9 @@ def digest(
         "planned_km": round(planned_m / 1000, 1),
         "actual_km": round(actual_m / 1000, 1),
         "completion": round(actual_m / planned_m, 3) if planned_m else 0.0,
-        "sessions_done": sum(1 for s in sessions if s.status == "done"),
+        "sessions_done": sum(
+            1 for s in sessions if s.status in COMPLETED_SESSION_STATUSES
+        ),
         "sessions_total": len(sessions),
         "adaptations": [
             {

@@ -174,3 +174,10 @@ GOAL_PACE_ADVANCE_S = 5.0
 # costs one list call plus detail for anything new, so this interval is far
 # inside the cap while keeping the dashboard close to live.
 SYNC_INTERVAL_MINUTES = 20
+
+
+# --- Session status ------------------------------------------------------
+# A session run on a different day than prescribed is still a session that was
+# run. Treating only "done" as completion made a moved session count against
+# compliance twice: absent from the done tally, and present in the missed one.
+COMPLETED_SESSION_STATUSES = frozenset({"done", "moved"})

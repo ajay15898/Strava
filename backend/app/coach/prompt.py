@@ -108,7 +108,9 @@ def templated_summary(context: dict) -> str:
         missing.append("volume")
 
     if plan.get("this_week"):
-        done = sum(1 for s in plan["this_week"] if s.get("status") == "done")
+        done = sum(
+            1 for s in plan["this_week"] if s.get("status") in {"done", "moved"}
+        )
         lines.append(
             f"Week {plan.get('current_week_no')} of {plan.get('weeks')}: "
             f"{done} of {len(plan['this_week'])} sessions completed."

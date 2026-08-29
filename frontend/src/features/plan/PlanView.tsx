@@ -6,6 +6,7 @@ import {
   Flag,
   Lightning,
   Path,
+  ArrowUUpRight,
   WarningCircle,
   XCircle,
 } from "@phosphor-icons/react";
@@ -46,16 +47,27 @@ function StatusControl({
 }) {
   const c = CHART[mode];
   const done = session.status === "done";
+  // A session run on another day is still a session that was run. It gets its
+  // own mark rather than being folded into "done", because *when* you ran it
+  // is the thing you would want to see at a glance.
+  const moved = session.status === "moved";
   const missed = session.status === "missed";
+  const completed = done || moved;
 
-  const color = done ? c.good : missed ? c.critical : "var(--text-muted)";
-  const Icon = done ? CheckCircle : missed ? XCircle : Circle;
+  const color = done
+    ? c.good
+    : moved
+      ? c.series2
+      : missed
+        ? c.critical
+        : "var(--text-muted)";
+  const Icon = done ? CheckCircle : moved ? ArrowUUpRight : missed ? XCircle : Circle;
 
   return (
     <button
       type="button"
-      aria-label={done ? "Mark as not done" : "Mark as done"}
-      onClick={() => onChange(done ? "planned" : "done")}
+      aria-label={completed ? "Mark as not done" : "Mark as done"}
+      onClick={() => onChange(completed ? "planned" : "done")}
       className="grid h-7 w-7 shrink-0 place-items-center rounded-full transition-transform duration-200 active:scale-90"
       style={{ color }}
     >
@@ -151,7 +163,8 @@ function WeekRow({
               className="tnum w-[68px] shrink-0 text-right text-[13px] font-medium"
               style={{
                 color: "var(--text-primary)",
-                textDecoration: s.status === "done" ? "line-through" : undefined,
+                textDecoration:
+                  s.status === "done" || s.status === "moved" ? "line-through" : undefined,
               }}
             >
               {s.target_distance_m ? `${km(s.target_distance_m, 1)} km` : "—"}
@@ -162,6 +175,15 @@ function WeekRow({
                 ? `${pace(s.target_pace_low)}–${pace(s.target_pace_high)}`
                 : ""}
             </span>
+
+            {s.status === "moved" && (
+              <span
+                className="rounded-full px-2 py-0.5 text-[10.5px] font-medium tracking-wide uppercase"
+                style={{ background: `${c.series2}1f`, color: c.series2 }}
+              >
+                ran another day
+              </span>
+            )}
 
             {s.structure?.reps ? (
               <span className="text-[12px]" style={{ color: "var(--text-muted)" }}>
