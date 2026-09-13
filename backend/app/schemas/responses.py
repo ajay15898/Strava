@@ -113,6 +113,9 @@ class PredictionOut(BaseModel):
     blended_s: int
     durability_ratio: float
     durability_penalty_pct: float
+    #: The number the durability ratio is built from. Omitting it left
+    #: consumers unable to explain the penalty without recomputing it.
+    longest_run_m: float
     predicted_time_s: int
     predicted_time_display: str | None
     predicted_pace_s_per_km: float

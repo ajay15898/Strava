@@ -131,6 +131,7 @@ def prediction(
         blended_s=p.blended_s,
         durability_ratio=p.durability_ratio,
         durability_penalty_pct=p.durability_penalty_pct,
+        longest_run_m=round(p.longest_run_m, 1),
         predicted_time_s=p.predicted_time_s,
         predicted_time_display=fmt_duration(p.predicted_time_s),
         predicted_pace_s_per_km=round(p.predicted_pace_s_per_km, 1),
